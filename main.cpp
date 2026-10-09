@@ -46,6 +46,8 @@
 #define IDC_BTN_REFRESH     1009
 #define IDC_BTN_LOGOFF      1010
 #define IDC_BTN_REBOOT      1011
+#define IDC_BTN_SAVE        1012
+#define IDC_BTN_REGEDIT     1013
 #define WM_REFRESH_DONE     (WM_USER + 1)
 
 // 右键菜单命令
@@ -67,6 +69,8 @@ HWND g_hBtnRelaunch = nullptr;
 HWND g_hBtnRefresh = nullptr;
 HWND g_hBtnLogoff = nullptr;
 HWND g_hBtnReboot = nullptr;
+HWND g_hBtnSave = nullptr;
+HWND g_hBtnRegedit = nullptr;
 HWND g_hStaticStatus = nullptr;
 HWND g_hStaticHint = nullptr;
 
@@ -257,7 +261,7 @@ bool SaveBackupName(const std::wstring& name);
 bool LoadBackupName(std::wstring& outName) {
     outName.clear();
 
-    // 1. 优先从注册表读取
+    // 只从注册表读取备份
     HKEY hKey;
     if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, REG_KEY, 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
         wchar_t buf[256] = {0};
@@ -268,32 +272,7 @@ bool LoadBackupName(std::wstring& outName) {
         }
         RegCloseKey(hKey);
     }
-    if (!outName.empty()) return true;
-
-    // 2. 回退：扫描 exe 同目录下的 .txt 文件（兼容旧版备份）
-    std::wstring dir = GetExeDir();
-    std::wstring pattern = dir + L"*.txt";
-    WIN32_FIND_DATAW fd = {0};
-    HANDLE hFind = FindFirstFileW(pattern.c_str(), &fd);
-    if (hFind == INVALID_HANDLE_VALUE) return false;
-
-    std::wstring found;
-    do {
-        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
-        wchar_t fname[_MAX_FNAME] = {0};
-        _wsplitpath_s(fd.cFileName, nullptr, 0, nullptr, 0, fname, _MAX_FNAME, nullptr, 0);
-        std::wstring name = fname;
-        if (name.empty()) continue;
-        found = name;
-        break;
-    } while (FindNextFileW(hFind, &fd));
-    FindClose(hFind);
-
-    if (found.empty()) return false;
-    outName = found;
-    // 迁移到注册表，以后不再依赖 txt 文件
-    SaveBackupName(outName);
-    return true;
+    return !outName.empty();
 }
 
 bool SaveBackupName(const std::wstring& name) {
@@ -311,27 +290,6 @@ bool SaveBackupName(const std::wstring& name) {
         RegCloseKey(hKey);
     }
 
-    // 2. 同时写 txt 文件（双保险，且方便用户查看）
-    std::wstring dir = GetExeDir();
-    std::wstring pattern = dir + L"*.txt";
-    WIN32_FIND_DATAW fd = {0};
-    HANDLE hFind = FindFirstFileW(pattern.c_str(), &fd);
-    if (hFind != INVALID_HANDLE_VALUE) {
-        do {
-            if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
-            std::wstring oldFile = dir + fd.cFileName;
-            DeleteFileW(oldFile.c_str());
-        } while (FindNextFileW(hFind, &fd));
-        FindClose(hFind);
-    }
-    std::wstring path = dir + name + L".txt";
-    HANDLE hFile = CreateFileW(path.c_str(), GENERIC_WRITE, 0, nullptr,
-        CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (hFile != INVALID_HANDLE_VALUE) {
-        CloseHandle(hFile);
-        ok = true;
-    }
-
     return ok;
 }
 
@@ -346,6 +304,7 @@ bool SaveBackupName(const std::wstring& name) {
 #define COLOR_SUCCESS     RGB(0, 150, 80)      // 绿色（还原）
 #define COLOR_WARN        RGB(180, 120, 0)     // 橙色（注销/重启）
 #define COLOR_INFO        RGB(80, 80, 85)      // 灰色（刷新）
+#define COLOR_CYAN        RGB(0, 150, 170)     // 青色（保存）
 #define COLOR_HINT_OK     RGB(80, 200, 120)    // 合法提示绿
 #define COLOR_HINT_ERR    RGB(240, 100, 100)   // 错误提示红
 
@@ -354,7 +313,7 @@ HBRUSH g_hbrPanel = nullptr;
 HBRUSH g_hbrEditBg = nullptr;
 
 // 按钮类型
-enum BtnType { BTN_BLUE, BTN_GREEN, BTN_ORANGE, BTN_GRAY };
+enum BtnType { BTN_BLUE, BTN_GREEN, BTN_ORANGE, BTN_GRAY, BTN_CYAN };
 struct BtnStyle { BtnType type; bool hover; bool pressed; };
 std::map<HWND, BtnStyle> g_btnStyles;
 
@@ -390,6 +349,7 @@ COLORREF GetBtnColor(BtnType type, bool hover, bool pressed) {
     case BTN_BLUE:   base = COLOR_ACCENT;  break;
     case BTN_GREEN:  base = COLOR_SUCCESS; break;
     case BTN_ORANGE: base = COLOR_WARN;    break;
+    case BTN_CYAN:   base = COLOR_CYAN;    break;
     default:         base = COLOR_INFO;    break;
     }
     if (pressed) {
@@ -603,7 +563,7 @@ void CreateControls(HWND hWnd) {
 
     int x = 24;
     int y = 20;
-    int w = 572;
+    int w = 492;
 
     // 标题
     HWND hTitle = CreateWindowExW(0, L"STATIC", L"修改电脑设备名",
@@ -661,27 +621,40 @@ void CreateControls(HWND hWnd) {
     SendMessageW(g_hStaticHint, WM_SETFONT, (WPARAM)g_hFontSmall, TRUE);
     y += 26;
 
-    // 主操作按钮：修改 / 还原
-    int btnW = (w - 12) / 2;
-    g_hBtnModify = CreateWindowExW(0, L"BUTTON", L"  修改计算机名",
+    // 主操作按钮：修改 / 保存当前名 / 还原
+    int btnW = (w - 24) / 3;
+    g_hBtnModify = CreateWindowExW(0, L"BUTTON", L"修改计算机名",
         WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | BS_OWNERDRAW,
         x, y, btnW, 36, hWnd, (HMENU)IDC_BTN_MODIFY, g_hInst, nullptr);
-    SendMessageW(g_hBtnModify, WM_SETFONT, (WPARAM)g_hFontNormal, TRUE);
+    SendMessageW(g_hBtnModify, WM_SETFONT, (WPARAM)g_hFontSmall, TRUE);
     SubclassButton(g_hBtnModify, BTN_BLUE);
 
-    g_hBtnRestore = CreateWindowExW(0, L"BUTTON", L"  还原为备份名称",
+    g_hBtnSave = CreateWindowExW(0, L"BUTTON", L"保存当前名",
         WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | BS_OWNERDRAW,
-        x + btnW + 12, y, btnW, 36, hWnd, (HMENU)IDC_BTN_RESTORE, g_hInst, nullptr);
-    SendMessageW(g_hBtnRestore, WM_SETFONT, (WPARAM)g_hFontNormal, TRUE);
+        x + btnW + 12, y, btnW, 36, hWnd, (HMENU)IDC_BTN_SAVE, g_hInst, nullptr);
+    SendMessageW(g_hBtnSave, WM_SETFONT, (WPARAM)g_hFontSmall, TRUE);
+    SubclassButton(g_hBtnSave, BTN_CYAN);
+
+    g_hBtnRestore = CreateWindowExW(0, L"BUTTON", L"还原为备份名",
+        WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | BS_OWNERDRAW,
+        x + (btnW + 12) * 2, y, btnW, 36, hWnd, (HMENU)IDC_BTN_RESTORE, g_hInst, nullptr);
+    SendMessageW(g_hBtnRestore, WM_SETFONT, (WPARAM)g_hFontSmall, TRUE);
     SubclassButton(g_hBtnRestore, BTN_GREEN);
     y += 46;
 
-    // 刷新网络名称
-    g_hBtnRefresh = CreateWindowExW(0, L"BUTTON", L"刷新网络名称（让局域网立即看到新名）",
+    // 刷新网络名称 / 打开注册表
+    int btnW3 = (w - 12) / 2;
+    g_hBtnRefresh = CreateWindowExW(0, L"BUTTON", L"刷新网络名称",
         WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | BS_OWNERDRAW,
-        x, y, w, 32, hWnd, (HMENU)IDC_BTN_REFRESH, g_hInst, nullptr);
+        x, y, btnW3, 32, hWnd, (HMENU)IDC_BTN_REFRESH, g_hInst, nullptr);
     SendMessageW(g_hBtnRefresh, WM_SETFONT, (WPARAM)g_hFontSmall, TRUE);
     SubclassButton(g_hBtnRefresh, BTN_GRAY);
+
+    g_hBtnRegedit = CreateWindowExW(0, L"BUTTON", L"打开注册表",
+        WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | BS_OWNERDRAW,
+        x + btnW3 + 12, y, btnW3, 32, hWnd, (HMENU)IDC_BTN_REGEDIT, g_hInst, nullptr);
+    SendMessageW(g_hBtnRegedit, WM_SETFONT, (WPARAM)g_hFontSmall, TRUE);
+    SubclassButton(g_hBtnRegedit, BTN_GRAY);
     y += 40;
 
     // 注销 / 重启
@@ -818,6 +791,52 @@ LRESULT CALLBACK MainWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) 
                 L"计算机名已成功还原。\r\n\r\n"
                 L"注意：需要注销或重启 Windows 后新名称才会完全生效。",
                 L"还原成功", MB_OK | MB_ICONINFORMATION);
+            return 0;
+        }
+        case IDC_BTN_SAVE: {
+            // 保存当前计算机名到注册表作为备份
+            if (g_currentName.empty()) {
+                MessageBoxW(hWnd, L"无法获取当前计算机名", L"保存失败", MB_OK | MB_ICONERROR);
+                return 0;
+            }
+            if (SaveBackupName(g_currentName)) {
+                g_backupName = g_currentName;
+                SetWindowTextW(g_hEditBackup, g_backupName.c_str());
+                RefreshStatus();
+                MessageBoxW(hWnd,
+                    (L"已将当前计算机名 \"" + g_currentName + L"\" 保存为备份名称。").c_str(),
+                    L"保存成功", MB_OK | MB_ICONINFORMATION);
+            } else {
+                MessageBoxW(hWnd, L"保存到注册表失败，请检查权限", L"保存失败", MB_OK | MB_ICONERROR);
+            }
+            return 0;
+        }
+        case IDC_BTN_REGEDIT: {
+            // 打开注册表编辑器并自动定位到 HKLM\SOFTWARE\RenameComputer
+            // 原理：设置 HKCU\...\Regedit\LastKey，regedit 启动时会自动跳到该键
+
+            const wchar_t* targetKey = L"计算机\\HKEY_LOCAL_MACHINE\\SOFTWARE\\RenameComputer";
+
+            // 写入 LastKey
+            HKEY hKey;
+            if (RegCreateKeyExW(HKEY_CURRENT_USER,
+                L"Software\\Microsoft\\Windows\\CurrentVersion\\Applets\\Regedit",
+                0, nullptr, 0, KEY_WRITE, nullptr, &hKey, nullptr) == ERROR_SUCCESS) {
+                DWORD size = (DWORD)((wcslen(targetKey) + 1) * sizeof(wchar_t));
+                RegSetValueExW(hKey, L"LastKey", 0, REG_SZ, (const BYTE*)targetKey, size);
+                RegCloseKey(hKey);
+            }
+
+            // 启动 regedit，会自动定位到 LastKey
+            HINSTANCE hRet = ShellExecuteW(hWnd, L"open", L"regedit.exe", L"-m", nullptr, SW_SHOWNORMAL);
+            if ((INT_PTR)hRet <= 32) {
+                // -m 参数失败，尝试不带参数
+                hRet = ShellExecuteW(hWnd, L"open", L"regedit.exe", nullptr, nullptr, SW_SHOWNORMAL);
+                if ((INT_PTR)hRet <= 32) {
+                    MessageBoxW(hWnd, L"无法打开注册表编辑器", L"错误", MB_OK | MB_ICONERROR);
+                    return 0;
+                }
+            }
             return 0;
         }
         case IDC_BTN_REFRESH: {
@@ -981,7 +1000,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int) {
     HWND hWnd = CreateWindowExW(
         0, CLASS_NAME, L"修改电脑设备名",
         WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
-        CW_USEDEFAULT, CW_USEDEFAULT, 620, 560,
+        CW_USEDEFAULT, CW_USEDEFAULT, 540, 520,
         nullptr, nullptr, hInstance, nullptr
     );
     if (!hWnd) return 0;
