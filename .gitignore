@@ -1,0 +1,20 @@
+# 编译产物
+*.obj
+*.res
+*.exe
+*.pdb
+*.ilk
+*.idb
+
+# 临时文件
+*.tmp
+*.bak
+*.log
+build_rename/
+nul
+
+# 运行时备份
+*.txt
+
+# IDE
+.arts/

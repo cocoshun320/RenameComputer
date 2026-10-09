@@ -1,0 +1,6 @@
+// 应用程序资源文件
+// 图标资源
+#include <windows.h>
+
+// 主图标 (ID 101, 用于 exe 图标)
+101 ICON "app.ico"
