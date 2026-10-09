@@ -2,14 +2,25 @@
 
 一个用 C++ (Win32 API) 编写的 Windows GUI 程序，用于修改本机的计算机名（如 `DESKTOP-XXXXXXX` → 自定义名称），并支持一键还原。
 
+## 下载
+
+直接下载编译好的程序（无需编译）：
+
+👉 [**RenameComputer.exe**](https://github.com/cocoshun320/RenameComputer/releases/download/v1.0/RenameComputer.exe)
+
+右键 → 以管理员身份运行即可。
+
 ## 截图
 
 程序采用深色主题 UI，自绘彩色按钮：
 
-- 蓝色按钮 — 修改计算机名
-- 绿色按钮 — 还原为备份名称
-- 灰色按钮 — 刷新网络名称
-- 橙色按钮 — 注销 / 重启 Windows
+| 按钮颜色 | 功能 |
+|---------|------|
+| 蓝色 | 修改计算机名 |
+| 青色 | 保存当前名（手动备份） |
+| 绿色 | 还原为备份名 |
+| 灰色 | 刷新网络名称 / 打开注册表 |
+| 橙色 | 注销 / 重启 Windows |
 
 ## 功能特性
 
@@ -18,20 +29,30 @@
 - **显示已备份的原名称** — 用于还原参考，同样可复制
 - **输入新名称** — 实时校验合法性，显示字符计数（如 `8/15 字符`）
 - **修改计算机名** — 写入 4 处注册表位置，确保改名彻底
-- **还原为备份名称** — 一键恢复到 OEM 默认名
+- **保存当前名** — 手动将当前计算机名保存到注册表作为备份（青色按钮）
+- **还原为备份名** — 一键恢复到备份的名称
 
 ### 自动备份
 - 启动时若检测到当前名是 OEM 默认格式（`DESKTOP-XXXXX`、`LAPTOP-XXXXX` 等），自动备份到注册表
+- 也可点击「保存当前名」按钮手动备份任意时候的计算机名
 - 备份位置：`HKLM\SOFTWARE\RenameComputer\OriginalName`
-- 单个 exe 即可还原，无需额外文件
+- 备份仅存于注册表，单个 exe 即可还原，无需额外文件
 
 ### 网络刷新
-- 点击「刷新网络名称」会异步执行 `nbtstat -R`、`nbtstat -RR`、`ipconfig /renew`
-- 让局域网内其他设备立即看到新计算机名（不卡 UI，后台线程执行）
+点击「刷新网络名称」会异步执行以下命令（不卡 UI，后台线程执行）：
+- `nbtstat -R` — 清除 NetBIOS 名称缓存
+- `nbtstat -RR` — 释放并刷新 NetBIOS 名称
+- `ipconfig /flushdns` — 清除 DNS 缓存
+- `ipconfig /renew` — 重新获取 IP
+- 重启 `fdPHost`、`FDResPub`、`LanmanServer` 服务 — 让网络发现重新广播新名称
+
+### 打开注册表
+- 点击「打开注册表」按钮，自动打开 `regedit` 并定位到 `HKLM\SOFTWARE\RenameComputer`
+- 方便查看备份的原始名称
 
 ### 注销 / 重启
 - 「注销 Windows」— 注销当前用户，重新登录后新名完全生效
-- 「重启电脑」— 重启系统，新名完全生效
+- 「重启电脑」— 重启系统，新名完全生效，网络中发现的新名称也会更新
 
 ### 权限要求
 - 程序**必须以管理员权限运行**
@@ -66,6 +87,7 @@
 
 ### 网络层（刷新后生效）
 点击「刷新网络名称」后，局域网内其他设备可以通过 `nbtstat` / ping 看到新名字。
+但如果网络中发现列表仍显示旧名称，可能需要**重启电脑**才能彻底清除缓存。
 
 ### 本机会话层（需注销/重启）
 当前已登录会话的**环境变量**（`COMPUTERNAME`、`USERDOMAIN` 等）和部分系统显示名称，**必须注销或重启** 才会更新。
@@ -122,8 +144,10 @@ g++ -O2 -std=c++17 -municode -o RenameComputer.exe main.cpp app.rc \
 5. 点击蓝色「修改计算机名」按钮
 6. 根据需要：
    - 点击「刷新网络名称」让局域网立即看到新名
+   - 点击「打开注册表」查看备份的原始名称
    - 点击「注销 Windows」或「重启电脑」让本机完全生效
-7. 如需恢复原名称，点击绿色「还原为备份名称」按钮
+7. 如需手动备份当前名，点击青色「保存当前名」按钮
+8. 如需恢复原名称，点击绿色「还原为备份名」按钮
 
 ## 文件说明
 
@@ -134,7 +158,7 @@ g++ -O2 -std=c++17 -municode -o RenameComputer.exe main.cpp app.rc \
 | `app.ico` | 程序图标（32x32，深色主题电脑+改名标识） |
 | `gen_icon.cpp` | 图标生成器源码（用于生成 app.ico） |
 | `build.bat` | 自动检测编译器的编译脚本 |
-| `RenameComputer.exe` | 编译后的可执行文件（约 176 KB） |
+| `RenameComputer.exe` | 编译后的可执行文件（约 170 KB） |
 
 ## 技术细节
 
@@ -156,4 +180,19 @@ g++ -O2 -std=c++17 -municode -o RenameComputer.exe main.cpp app.rc \
 - `WM_MOUSEMOVE` + `TrackMouseEvent` 实现悬停效果
 - `WM_LBUTTONDOWN` / `WM_LBUTTONUP` 实现按下效果
 
+### 打开注册表并自动定位
 
+通过设置 `HKCU\Software\Microsoft\Windows\CurrentVersion\Applets\Regedit\LastKey` 值，然后启动 `regedit -m`，注册表编辑器会自动跳转到该键。
+
+### 异步网络刷新
+
+使用 `std::thread` 后台执行命令，完成后通过 `PostMessageW(WM_REFRESH_DONE)` 通知主线程更新 UI，避免界面卡顿。
+
+## GitHub
+
+- **仓库**：https://github.com/cocoshun320/RenameComputer
+- **下载**：https://github.com/cocoshun320/RenameComputer/releases/tag/v1.0
+
+## 许可
+
+本程序可自由使用和修改。

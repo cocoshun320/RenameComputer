@@ -18,3 +18,7 @@ nul
 
 # IDE
 .arts/
+
+# 临时脚本
+create_release.py
+release_log.txt
