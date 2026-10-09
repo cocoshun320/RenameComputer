@@ -156,10 +156,4 @@ g++ -O2 -std=c++17 -municode -o RenameComputer.exe main.cpp app.rc \
 - `WM_MOUSEMOVE` + `TrackMouseEvent` 实现悬停效果
 - `WM_LBUTTONDOWN` / `WM_LBUTTONUP` 实现按下效果
 
-### 异步网络刷新
 
-使用 `std::thread` 后台执行 `nbtstat` / `ipconfig` 命令，完成后通过 `PostMessageW(WM_REFRESH_DONE)` 通知主线程更新 UI，避免界面卡顿。
-
-## 许可
-
-本程序可自由使用和修改。
