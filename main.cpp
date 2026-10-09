@@ -845,13 +845,23 @@ LRESULT CALLBACK MainWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) 
             SetWindowTextW(g_hBtnRefresh, L"正在刷新...");
             // 异步执行，避免卡 UI
             std::thread([]() {
+                // 增强的网络刷新命令
                 const wchar_t* cmds[] = {
-                    L"nbtstat -R",
-                    L"nbtstat -RR",
-                    L"ipconfig /renew"
+                    L"nbtstat -R",        // 清除 NetBIOS 名称缓存
+                    L"nbtstat -RR",       // 释放并刷新 NetBIOS 名称
+                    L"ipconfig /flushdns", // 清除 DNS 缓存
+                    L"ipconfig /renew",   // 重新获取 IP
+                    // 重启网络相关服务，让新计算机名在网络中发现
+                    L"net stop fdPHost",
+                    L"net stop FDResPub",
+                    L"net stop LanmanServer",
+                    L"net start LanmanServer",
+                    L"net start fdPHost",
+                    L"net start FDResPub",
                 };
                 std::wstring result;
-                for (int i = 0; i < 3; ++i) {
+                int cmdCount = sizeof(cmds) / sizeof(cmds[0]);
+                for (int i = 0; i < cmdCount; ++i) {
                     STARTUPINFOW si = {sizeof(si)};
                     si.dwFlags = STARTF_USESHOWWINDOW;
                     si.wShowWindow = SW_HIDE;
@@ -860,7 +870,7 @@ LRESULT CALLBACK MainWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) 
                     wcscpy_s(cmd, cmds[i]);
                     if (CreateProcessW(nullptr, cmd, nullptr, nullptr, FALSE,
                         CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi)) {
-                        WaitForSingleObject(pi.hProcess, 10000);
+                        WaitForSingleObject(pi.hProcess, 15000);
                         CloseHandle(pi.hProcess);
                         CloseHandle(pi.hThread);
                         result += std::wstring(cmds[i]) + L"  OK\r\n";
@@ -868,6 +878,7 @@ LRESULT CALLBACK MainWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) 
                         result += std::wstring(cmds[i]) + L"  FAILED\r\n";
                     }
                 }
+                result += L"\r\n网络名称已刷新。\r\n如果网络中仍显示旧名称，请重启电脑。";
                 // 发消息回主线程
                 wchar_t* pResult = _wcsdup(result.c_str());
                 PostMessageW(g_hMainWnd, WM_REFRESH_DONE, 0, (LPARAM)pResult);
